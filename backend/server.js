@@ -95,26 +95,41 @@ app.post("/login", async (req, res) => {
 
 
 app.post("/add-task", authenticateToken, async (req, res) => {
-  const { title, loginUserName, description, status } = req.body;
-  const createdAt = new Date().toLocaleString();
-  const updatedAt = new Date().toLocaleString();
-  let userId;
+    const { title, loginUserName, description, status } = req.body;
+    const createdAt = new Date().toLocaleString();
+    const updatedAt = new Date().toLocaleString();
 
-  await db.get(`SELECT id FROM users WHERE username = ?`, [loginUserName], (err, row) => {
-    if (row) {
-      userId = row.id;
+    try {
+       
+        const userId = await getUserId(loginUserName);
+       
+        const sql = `
+            INSERT INTO Tasks (title, description, status, assignee_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `;
+        db.run(sql, [title, description, status, userId, createdAt, updatedAt]);
+
+        res.json("Data Added Successfully.");
+    } catch (error) {
+        console.error("Error adding task:", error);
+        res.status(500).json("Internal Server Error");
     }
-  });
-
-  const sql = `
-    INSERT INTO Tasks (title, description, status, assignee_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `;
-
-  await db.run(sql, [title, description, status, userId, createdAt, updatedAt]);
-  
-  res.json("Data Added Successfully.");
 });
+
+
+async function getUserId(loginUserName) {
+    return new Promise((resolve, reject) => {
+        db.get(`SELECT id FROM users WHERE username = ?`, [loginUserName], (err, row) => {
+            if (err) {
+                reject(err);
+            } else if (row) {
+                resolve(row.id);
+            } else {
+                reject(new Error("User not found"));
+            }
+        });
+    });
+}
 
 
 
@@ -135,6 +150,64 @@ app.delete("/tasks/:id", authenticateToken, (req, res) => {
     res.json("Task Deleted Successfully.");
   });
 });
+
+
+app.put("/tasks/:id", authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { title, description, status } = req.body;
+    const time = new Date().toLocaleString();
+    console.log(title, description, status, time, id);
+    db.run(
+        `UPDATE Tasks SET title = ?, description = ?, status = ?, updated_at = ? WHERE id = ?`,
+        [title, description, status, time, id], 
+        function(err) {
+            if (err) {
+                console.error(err);
+                res.status(500).json("Internal Server Error");
+            } else {
+                res.json("Task Updated Successfully.");
+            }
+        }
+    );
+});
+
+
+
+app.get('/tasks/search', authenticateToken, async (req, res) => {
+    const { query } = req.query;
+  
+    db.get(`SELECT id FROM users WHERE username = ?`, [query], (err, row) => {
+      if (err) {
+        return res.status(500).json({ error: 'Internal Server Error' });
+      }
+  
+      if (!row) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+  
+      const userId = row.id;
+  
+      db.all(`
+        SELECT *,
+               (SELECT COUNT(*) FROM Tasks WHERE assignee_id = ?) AS count
+        FROM Tasks 
+        WHERE assignee_id = ?;
+      `, [userId, userId], (err, rows) => {
+        if (err) {
+          return res.status(500).json({ error: 'Internal Server Error' });
+        }
+  
+        res.json({ tasks: rows, count: rows.length > 0 ? rows[0].count : 0 });
+      });
+    });
+  });
+  
+     
+  
+
+  
+
+
 
 
 
